@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const DeliveryPerson = require('../models/DeliveryPerson');
 const Tracking = require('../models/Tracking');
 const haversine = require('haversine-distance');
+const { WAREHOUSE_COORDINATES } = require('../config/constants'); // ✅ Step 1: Import warehouse coords
 
 const assignOrders = async () => {
   try {
@@ -28,14 +29,19 @@ const assignOrders = async () => {
       const clusterOrders = orders.filter((_, idx) => clusters[idx] === i);
       const clusterCenter = centroids[i].centroid;
 
-      // 4. Find nearest available delivery partner
-      let minDist = Infinity;
+      // 4. Find best delivery partner using weighted score
       let bestPartner = null;
+      let minScore = Infinity;
 
       for (const partner of deliveryPartners) {
-        const dist = haversine(clusterCenter, partner.location.coordinates);
-        if (dist < minDist) {
-          minDist = dist;
+        const distToCluster = haversine(clusterCenter, partner.location.coordinates);
+        const distToWarehouse = haversine(WAREHOUSE_COORDINATES, partner.location.coordinates);
+
+        // Weighted score: prioritize closeness to cluster, then warehouse
+        const weightedScore = distToCluster * 0.7 + distToWarehouse * 0.3;
+
+        if (weightedScore < minScore) {
+          minScore = weightedScore;
           bestPartner = partner;
         }
       }
@@ -63,9 +69,6 @@ const assignOrders = async () => {
               }
             }
           );
-
-          // OPTIONAL: emit to delivery partner via socket
-          // io.to(`room-${bestPartner._id}`).emit('new-assignment', { order });
         }
 
         // Mark delivery partner unavailable
@@ -73,6 +76,7 @@ const assignOrders = async () => {
         await bestPartner.save();
       }
     }
+
     console.log('✅ Orders successfully assigned');
   } catch (err) {
     console.error('Error in assignOrders:', err);
